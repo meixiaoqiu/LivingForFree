@@ -29,3 +29,5 @@
 这不是答案。
 
 这是一场正在进行的实验。
+
+![免费活着封面](./content/cover.jpg "LivingForFree")
