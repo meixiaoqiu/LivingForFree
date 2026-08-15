@@ -1,0 +1,272 @@
+name: Build PDF
+
+# 只允许手动运行。
+# push、commit、tag 都不会自动触发。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号，例如 v0.1.0"
+        required: true
+        type: string
+
+# 创建 Release 需要写权限
+permissions:
+  contents: write
+
+jobs:
+  build-pdf:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 1. 下载当前仓库内容
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # 2. 安装 PDF 排版所需工具和中文字体
+      - name: Install PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pandoc \
+            texlive-xetex \
+            texlive-lang-chinese \
+            texlive-latex-extra \
+            fonts-noto-cjk \
+            qpdf
+
+      # 3. 找出 content/ 下所有数字开头的章节
+      #    自动按照 01、02、03……排序
+      #    同时去掉网站使用的 YAML 元数据
+      - name: Assemble chapters
+        run: |
+          mkdir -p build
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          files = sorted(
+              Path("content").glob("[0-9][0-9]*.md"),
+              key=lambda p: int(p.name[:2])
+          )
+
+          if not files:
+              raise SystemExit("没有找到章节文件")
+
+          chapters = []
+
+          for path in files:
+              text = path.read_text(encoding="utf-8")
+
+              # 默认标题使用文件名
+              title = path.stem
+              body = text
+
+              # 解析 Markdown 顶部的 YAML front matter
+              match = re.match(
+                  r"^---\s*\n(.*?)\n---\s*\n?(.*)$",
+                  text,
+                  re.S
+              )
+
+              if match:
+                  front_matter, body = match.groups()
+
+                  title_match = re.search(
+                      r'^title:\s*(.+?)\s*$',
+                      front_matter,
+                      re.M
+                  )
+
+                  if title_match:
+                      title = title_match.group(1)
+                      title = title.strip().strip('"').strip("'")
+
+              chapters.append(
+                  f"# {title}\n\n{body.strip()}\n"
+              )
+
+              print("加入章节:", path)
+
+          Path("build/book.md").write_text(
+              "\n\n".join(chapters),
+              encoding="utf-8"
+          )
+          PY
+
+      # 4. 定义 PDF 排版
+      - name: Create PDF style
+        run: |
+          cat > build/header.tex <<'EOF'
+          \usepackage{fancyhdr}
+          \usepackage{indentfirst}
+
+          % 页码放在页尾中央
+          \pagestyle{fancy}
+          \fancyhf{}
+          \fancyfoot[C]{\thepage}
+          \renewcommand{\headrulewidth}{0pt}
+
+          % 章节首页也显示页码
+          \fancypagestyle{plain}{
+            \fancyhf{}
+            \fancyfoot[C]{\thepage}
+            \renewcommand{\headrulewidth}{0pt}
+          }
+
+          % 首行缩进
+          \setlength{\parindent}{2em}
+
+          % 正常段间距
+          \setlength{\parskip}{0.35em}
+
+          % 正文约 15pt，行距约 21pt
+          \makeatletter
+          \renewcommand\normalsize{
+            \@setfontsize\normalsize{15pt}{21pt}
+          }
+          \makeatother
+
+          \normalsize
+
+          % 中文章节标题样式
+          \ctexset{
+            chapter = {
+              format =
+                \raggedright
+                \bfseries
+                \fontsize{24pt}{32pt}
+                \selectfont,
+              beforeskip = 12pt,
+              afterskip = 24pt
+            },
+
+            section = {
+              format =
+                \raggedright
+                \bfseries
+                \fontsize{19pt}{26pt}
+                \selectfont
+            },
+
+            subsection = {
+              format =
+                \raggedright
+                \bfseries
+                \fontsize{17pt}{24pt}
+                \selectfont
+            }
+          }
+          EOF
+
+      # 5. 把所有 Markdown 章节生成正文 PDF
+      - name: Build book body
+        run: |
+          pandoc build/book.md \
+            --standalone \
+            --toc \
+            --toc-depth=2 \
+            --top-level-division=chapter \
+            --pdf-engine=xelatex \
+            -V documentclass=ctexbook \
+            -V classoption="openany,oneside" \
+            -V papersize=a4 \
+            -V geometry:margin=20mm \
+            -V CJKmainfont="Noto Serif CJK SC" \
+            -H build/header.tex \
+            -o build/body.pdf
+
+      # 6. 把 cover.jpg 单独制作成 A4 第一页
+      #    封面没有页码
+      - name: Build cover
+        run: |
+          cat > build/cover.tex <<'EOF'
+          \documentclass{article}
+
+          \usepackage[
+            a4paper,
+            margin=0pt
+          ]{geometry}
+
+          \usepackage{graphicx}
+          \usepackage{eso-pic}
+
+          \pagestyle{empty}
+
+          \begin{document}
+
+          \AddToShipoutPictureBG*{
+            \AtPageLowerLeft{
+              \includegraphics[
+                width=\paperwidth,
+                height=\paperheight
+              ]{content/cover.jpg}
+            }
+          }
+
+          \null
+
+          \end{document}
+          EOF
+
+          xelatex \
+            -interaction=nonstopmode \
+            -halt-on-error \
+            -output-directory=build \
+            build/cover.tex
+
+      # 7. 封面 + 正文 合成最终 PDF
+      - name: Merge PDF
+        run: |
+          qpdf \
+            --empty \
+            --pages \
+            build/cover.pdf 1 \
+            build/body.pdf 1-z \
+            -- \
+            build/LivingForFree.pdf
+
+          ls -lh build/LivingForFree.pdf
+
+      # 8. 检查版本号是否合法
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "版本号格式错误：$VERSION"
+            echo "请使用类似：v0.1.0、v0.2.0、v1.0.0"
+            exit 1
+          fi
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION 已经存在。"
+            echo "请换一个新的版本号。"
+            exit 1
+          fi
+
+          echo "准备发布版本：$VERSION"
+
+      # 9. 在 Actions 页面保留一份 PDF
+      - name: Upload PDF to Actions
+        uses: actions/upload-artifact@v7
+        with:
+          path: build/LivingForFree.pdf
+          archive: false
+          retention-days: 30
+
+      # 10. 创建 GitHub Release，并上传 PDF
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release create "$VERSION" \
+            "build/LivingForFree.pdf#《免费活着》PDF" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "《免费活着》 $VERSION" \
+            --notes "《免费活着》PDF 电子版。"
