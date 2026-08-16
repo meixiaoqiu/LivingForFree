@@ -119,7 +119,7 @@ jobs:
           % 首行缩进
           \setlength{\parindent}{2em}
 
-          % 正常段间距
+          % 段落间距
           \setlength{\parskip}{0.35em}
 
           % 正文约 15pt，行距约 21pt
@@ -128,35 +128,21 @@ jobs:
             \@setfontsize\normalsize{15pt}{21pt}
           }
           \makeatother
-
           \normalsize
 
-          % 中文章节标题样式
+          % 标题样式
+          % 注意：ctexset 内部不能随意插入空行
           \ctexset{
-            chapter = {
-              format =
-                \raggedright
-                \bfseries
-                \fontsize{24pt}{32pt}
-                \selectfont,
-              beforeskip = 12pt,
-              afterskip = 24pt
+            chapter={
+              format={\raggedright\bfseries\fontsize{24pt}{32pt}\selectfont},
+              beforeskip=12pt,
+              afterskip=24pt
             },
-
-            section = {
-              format =
-                \raggedright
-                \bfseries
-                \fontsize{19pt}{26pt}
-                \selectfont
+            section={
+              format={\raggedright\bfseries\fontsize{19pt}{26pt}\selectfont}
             },
-
-            subsection = {
-              format =
-                \raggedright
-                \bfseries
-                \fontsize{17pt}{24pt}
-                \selectfont
+            subsection={
+              format={\raggedright\bfseries\fontsize{17pt}{24pt}\selectfont}
             }
           }
           EOF
