@@ -10,6 +10,10 @@
 
 **一个普通人，即使没有那么成功，能不能仍然稳定、有尊严地活着。**
 
+PDF下载链接：
+
+<https://github.com/meixiaoqiu/LivingForFree/releases>
+
 ---
 
 ## 大苹果
