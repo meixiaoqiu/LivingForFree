@@ -5,7 +5,6 @@ name: Build PDF
 on:
   workflow_dispatch:
     inputs:
-
       mode:
         description: "运行模式：test 只生成 PDF；publish 同时发布到 Releases"
         required: true
@@ -40,16 +39,12 @@ on:
 
 
 # publish 模式创建 Release 需要写权限。
-# test 模式不会实际进行写入。
 permissions:
   contents: write
 
 
 jobs:
-
   build-pdf:
-
-    # 固定 Ubuntu 版本，避免 ubuntu-latest 未来变化影响排版。
     runs-on: ubuntu-24.04
 
     steps:
@@ -76,31 +71,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
         run: |
-
           echo "运行模式：$MODE"
           echo "正文字号：$FONT_SIZE pt"
           echo "正文行距：$LINE_HEIGHT pt"
           echo "页边距：$MARGIN_MM mm"
 
-          # --------------------------------------------------------
           # 检查字号
-          # --------------------------------------------------------
-
           if [[ ! "$FONT_SIZE" =~ ^[0-9]+$ ]]; then
             echo "font_size 必须是整数。"
             exit 1
           fi
 
           if (( FONT_SIZE < 12 || FONT_SIZE > 30 )); then
-            echo "font_size 建议范围：12 - 30"
+            echo "font_size 范围：12 - 30"
             exit 1
           fi
 
-
-          # --------------------------------------------------------
           # 检查行距
-          # --------------------------------------------------------
-
           if [[ ! "$LINE_HEIGHT" =~ ^[0-9]+$ ]]; then
             echo "line_height 必须是整数。"
             exit 1
@@ -111,26 +98,18 @@ jobs:
             exit 1
           fi
 
-
-          # --------------------------------------------------------
           # 检查页边距
-          # --------------------------------------------------------
-
           if [[ ! "$MARGIN_MM" =~ ^[0-9]+$ ]]; then
             echo "margin_mm 必须是整数。"
             exit 1
           fi
 
           if (( MARGIN_MM < 10 || MARGIN_MM > 35 )); then
-            echo "margin_mm 建议范围：10 - 35"
+            echo "margin_mm 范围：10 - 35"
             exit 1
           fi
 
-
-          # --------------------------------------------------------
-          # publish 模式才检查版本号
-          # --------------------------------------------------------
-
+          # publish 模式才需要版本号
           if [[ "$MODE" == "publish" ]]; then
 
             if [[ -z "$VERSION" ]]; then
@@ -163,20 +142,16 @@ jobs:
 
 
       # ============================================================
-      # 3. 安装 PDF 工具
+      # 3. 安装 PDF 工具和开源字体
       #
-      # 字体：
-      #
+      # 使用：
       # Noto Serif CJK SC
       # Noto Sans CJK SC
       # Noto Mono
-      #
-      # 均为开源字体。
       # ============================================================
 
       - name: Install PDF tools
         run: |
-
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -190,15 +165,15 @@ jobs:
 
 
       # ============================================================
-      # 4. 整理章节
+      # 4. 整理所有章节
       #
       # content/01xxx.md
       # content/02xxx.md
       # ...
       #
-      # 自动按照数字排序。
+      # 自动按数字顺序排列。
       #
-      # Markdown 顶部 YAML front matter 不进入 PDF。
+      # YAML front matter 不进入 PDF。
       #
       # 最后一章：
       # 二级及以下标题仍显示在正文中，
@@ -207,35 +182,21 @@ jobs:
 
       - name: Assemble chapters
         run: |
-
           mkdir -p build
 
           python3 - <<'PY'
-
           from pathlib import Path
           import re
-
-
-          # --------------------------------------------------------
-          # 找出章节
-          # --------------------------------------------------------
 
           files = sorted(
               Path("content").glob("[0-9][0-9]*.md"),
               key=lambda p: int(p.name[:2])
           )
 
-
           if not files:
               raise SystemExit("没有找到章节文件")
 
-
           chapters = []
-
-
-          # --------------------------------------------------------
-          # 逐章处理
-          # --------------------------------------------------------
 
           for index, path in enumerate(files):
 
@@ -243,28 +204,19 @@ jobs:
                   encoding="utf-8"
               )
 
-
-              # 默认标题使用文件名
               title = path.stem
-
               body = text
 
-
-              # ----------------------------------------------------
               # 解析 YAML front matter
-              # ----------------------------------------------------
-
               match = re.match(
                   r"^---\s*\n(.*?)\n---\s*\n?(.*)$",
                   text,
                   re.S
               )
 
-
               if match:
 
                   front_matter, body = match.groups()
-
 
                   title_match = re.search(
                       r'^title:\s*(.+?)\s*$',
@@ -272,25 +224,22 @@ jobs:
                       re.M
                   )
 
-
                   if title_match:
 
-                      title = title_match.group(1)
-
                       title = (
-                          title
+                          title_match
+                          .group(1)
                           .strip()
                           .strip('"')
                           .strip("'")
                       )
 
-
               # ----------------------------------------------------
               # 最后一章：
+              # 二级及以下标题不加入目录。
               #
-              # 保留二级及以下标题，
-              # 但增加 Pandoc 的 .unlisted 属性，
-              # 从 PDF 目录中隐藏。
+              # .unnumbered + .unlisted
+              # 两个属性一起使用。
               # ----------------------------------------------------
 
               if index == len(files) - 1:
@@ -298,56 +247,42 @@ jobs:
                   def hide_from_toc(match):
 
                       hashes = match.group(1)
+                      heading = match.group(2).rstrip()
 
-                      heading = (
-                          match
-                          .group(2)
-                          .rstrip()
-                      )
-
-
-                      # 标题已经有 Pandoc 属性
+                      # 标题本身已经存在 Pandoc 属性
                       attr_match = re.match(
                           r"^(.*?)(\s+\{([^}]*)\})$",
                           heading
                       )
 
-
                       if attr_match:
 
-                          heading_text = (
-                              attr_match
-                              .group(1)
-                          )
+                          heading_text = attr_match.group(1)
 
                           attrs = (
                               attr_match
                               .group(3)
+                              .split()
                           )
 
+                          if ".unnumbered" not in attrs:
+                              attrs.append(".unnumbered")
 
                           if ".unlisted" not in attrs:
-
-                              attrs = (
-                                  attrs
-                                  + " .unlisted"
-                              )
-
+                              attrs.append(".unlisted")
 
                           return (
                               f"{hashes} "
                               f"{heading_text} "
-                              f"{{{attrs.strip()}}}"
+                              f"{{{' '.join(attrs)}}}"
                           )
 
-
-                      # 没有属性
+                      # 标题没有任何已有属性
                       return (
                           f"{hashes} "
                           f"{heading} "
-                          "{.unlisted}"
+                          "{.unnumbered .unlisted}"
                       )
-
 
                   body = re.sub(
                       r"^(#{2,6})\s+(.+?)\s*$",
@@ -356,26 +291,15 @@ jobs:
                       flags=re.M
                   )
 
-
-              # ----------------------------------------------------
-              # 写入整本书
-              # ----------------------------------------------------
-
               chapters.append(
                   f"# {title}\n\n"
                   f"{body.strip()}\n"
               )
 
-
               print(
                   "加入章节:",
                   path
               )
-
-
-          # --------------------------------------------------------
-          # 输出临时 Markdown
-          # --------------------------------------------------------
 
           Path(
               "build/book.md"
@@ -384,15 +308,22 @@ jobs:
               encoding="utf-8"
           )
 
+          print(
+              "共加入章节：",
+              len(files)
+          )
+
           PY
 
 
       # ============================================================
-      # 5. 生成 PDF 排版配置
+      # 5. 创建动态 PDF 样式
       #
-      # 字号、行距可以直接从 Run workflow 页面调整。
+      # 字号和行距来自 Run workflow 参数。
       #
-      # 标题字号会根据正文字号自动变化。
+      # 注意：
+      # ctexset 内部不能出现空行，
+      # 否则会产生 ctex/\par 错误。
       # ============================================================
 
       - name: Create PDF style
@@ -401,12 +332,9 @@ jobs:
           LINE_HEIGHT: ${{ inputs.line_height }}
 
         run: |
-
           python3 - <<'PY'
-
           from pathlib import Path
           import os
-
 
           font_size = int(
               os.environ["FONT_SIZE"]
@@ -416,144 +344,63 @@ jobs:
               os.environ["LINE_HEIGHT"]
           )
 
-
-          # --------------------------------------------------------
-          # 标题尺寸自动跟随正文
-          # --------------------------------------------------------
-
+          # 标题自动跟随正文大小
           chapter_size = font_size + 12
-
           chapter_line = line_height + 13
 
-
           section_size = font_size + 5
-
           section_line = line_height + 5
 
-
           subsection_size = font_size + 2
-
           subsection_line = line_height + 2
-
-
-          # --------------------------------------------------------
-          # LaTeX 模板
-          # --------------------------------------------------------
 
           template = r"""
           \usepackage{fancyhdr}
           \usepackage{indentfirst}
 
-
-          % --------------------------------------------------------
           % 页码
-          % --------------------------------------------------------
-
           \pagestyle{fancy}
-
           \fancyhf{}
-
           \fancyfoot[C]{\thepage}
-
           \renewcommand{\headrulewidth}{0pt}
 
-
-          % 章节首页也显示页码
+          % 章节首页页码
           \fancypagestyle{plain}{
-
             \fancyhf{}
-
             \fancyfoot[C]{\thepage}
-
             \renewcommand{\headrulewidth}{0pt}
-
           }
 
-
-          % --------------------------------------------------------
           % 段落
-          % --------------------------------------------------------
-
           \setlength{\parindent}{2em}
-
           \setlength{\parskip}{0.35em}
 
-
-          % --------------------------------------------------------
           % 正文字号
-          % --------------------------------------------------------
-
           \makeatletter
-
           \renewcommand\normalsize{
-
-            \@setfontsize
-              \normalsize
-              {__FONT_SIZE__pt}
-              {__LINE_HEIGHT__pt}
-
+            \@setfontsize\normalsize{__FONT_SIZE__pt}{__LINE_HEIGHT__pt}
           }
-
           \makeatother
-
           \normalsize
 
-
-          % --------------------------------------------------------
           % 标题
-          % --------------------------------------------------------
-
+          % 此区域不要加入空行
           \ctexset{
-
             chapter={
-
-              format={
-                \raggedright
-                \bfseries
-                \fontsize
-                  {__CHAPTER_SIZE__pt}
-                  {__CHAPTER_LINE__pt}
-                \selectfont
-              },
-
+              format={\raggedright\bfseries\fontsize{__CHAPTER_SIZE__pt}{__CHAPTER_LINE__pt}\selectfont},
               beforeskip=12pt,
-
               afterskip=26pt
-
             },
-
             section={
-
-              format={
-                \raggedright
-                \bfseries
-                \fontsize
-                  {__SECTION_SIZE__pt}
-                  {__SECTION_LINE__pt}
-                \selectfont
-              }
-
+              format={\raggedright\bfseries\fontsize{__SECTION_SIZE__pt}{__SECTION_LINE__pt}\selectfont}
             },
-
             subsection={
-
-              format={
-                \raggedright
-                \bfseries
-                \fontsize
-                  {__SUBSECTION_SIZE__pt}
-                  {__SUBSECTION_LINE__pt}
-                \selectfont
-              }
-
+              format={\raggedright\bfseries\fontsize{__SUBSECTION_SIZE__pt}{__SUBSECTION_LINE__pt}\selectfont}
             }
-
           }
           """
 
-
           replacements = {
-
               "__FONT_SIZE__":
                   str(font_size),
 
@@ -577,17 +424,13 @@ jobs:
 
               "__SUBSECTION_LINE__":
                   str(subsection_line),
-
           }
 
-
           for old, new in replacements.items():
-
               template = template.replace(
                   old,
                   new
               )
-
 
           Path(
               "build/header.tex"
@@ -596,21 +439,21 @@ jobs:
               encoding="utf-8"
           )
 
-
           print(
-              f"正文："
-              f"{font_size}pt / "
+              f"正文：{font_size}pt / "
               f"{line_height}pt"
           )
 
           print(
-              f"章节标题："
-              f"{chapter_size}pt"
+              f"章节标题：{chapter_size}pt"
           )
 
           print(
-              f"二级标题："
-              f"{section_size}pt"
+              f"二级标题：{section_size}pt"
+          )
+
+          print(
+              f"三级标题：{subsection_size}pt"
           )
 
           PY
@@ -619,16 +462,7 @@ jobs:
       # ============================================================
       # 6. 生成正文 PDF
       #
-      # 使用开源 Noto 字体：
-      #
-      # 正文：
-      # Noto Serif CJK SC
-      #
-      # 无衬线：
-      # Noto Sans CJK SC
-      #
-      # 等宽：
-      # Noto Mono
+      # 全部使用开源 Noto 字体。
       # ============================================================
 
       - name: Build book body
@@ -636,7 +470,6 @@ jobs:
           MARGIN_MM: ${{ inputs.margin_mm }}
 
         run: |
-
           pandoc \
             build/book.md \
             --standalone \
@@ -655,21 +488,21 @@ jobs:
             -H build/header.tex \
             -o build/body.pdf
 
+          echo "正文 PDF："
+          ls -lh build/body.pdf
+
 
       # ============================================================
-      # 7. 生成封面
+      # 7. 生成 A4 封面
       #
       # content/cover.jpg
       #
-      # 独占 A4 第一页。
-      # 不显示页码。
+      # 封面不显示页码。
       # ============================================================
 
       - name: Build cover
         run: |
-
           cat > build/cover.tex <<'EOF'
-
           \documentclass{article}
 
           \usepackage[
@@ -678,42 +511,34 @@ jobs:
           ]{geometry}
 
           \usepackage{graphicx}
-
           \usepackage{eso-pic}
 
           \pagestyle{empty}
 
-
           \begin{document}
 
-
           \AddToShipoutPictureBG*{
-
             \AtPageLowerLeft{
-
               \includegraphics[
                 width=\paperwidth,
                 height=\paperheight
               ]{content/cover.jpg}
-
             }
-
           }
-
 
           \null
 
-
           \end{document}
-
           EOF
-
 
           xelatex \
             -interaction=nonstopmode \
             -halt-on-error \
             -output-directory=build \
             build/cover.tex
+
+          echo "封面 PDF："
+          ls -lh build/cover.pdf
 
 
       # ============================================================
@@ -723,9 +548,9 @@ jobs:
       # 版本显示“测试版（未发布）”
       #
       # publish：
-      # 显示真正版本号
+      # 显示真正版本号。
       #
-      # 时间固定显示 UTC+8。
+      # 时间：UTC+8
       # ============================================================
 
       - name: Build colophon
@@ -734,14 +559,11 @@ jobs:
           VERSION: ${{ inputs.version }}
 
         run: |
-
           python3 - <<'PY'
-
           from pathlib import Path
           from datetime import datetime
           from zoneinfo import ZoneInfo
           import os
-
 
           mode = os.environ["MODE"]
 
@@ -750,17 +572,10 @@ jobs:
               ""
           )
 
-
           if mode == "publish":
-
               display_version = version
-
           else:
-
-              display_version = (
-                  "测试版（未发布）"
-              )
-
+              display_version = "测试版（未发布）"
 
           generated_at = (
               datetime.now(
@@ -773,12 +588,10 @@ jobs:
               )
           )
 
-
           git_sha = os.environ.get(
               "GITHUB_SHA",
               ""
           )
-
 
           short_sha = (
               git_sha[:7]
@@ -786,46 +599,28 @@ jobs:
               else "unknown"
           )
 
-
           template = r"""
           \documentclass{article}
-
 
           \usepackage[
             a4paper,
             margin=25mm
           ]{geometry}
 
-
           \usepackage{fontspec}
-
           \usepackage{xeCJK}
 
-
-          % --------------------------------------------------------
-          % 开源字体
-          % --------------------------------------------------------
-
-          \setmainfont{
-            Noto Serif CJK SC
-          }
-
-          \setCJKmainfont{
-            Noto Serif CJK SC
-          }
-
+          \setmainfont{Noto Serif CJK SC}
+          \setCJKmainfont{Noto Serif CJK SC}
+          \setsansfont{Noto Sans CJK SC}
 
           \pagestyle{empty}
 
-
           \begin{document}
-
 
           \vspace*{\fill}
 
-
           \begin{center}
-
 
           {
             \fontsize{28pt}{40pt}
@@ -835,56 +630,42 @@ jobs:
             关于本电子版
           }
 
-
           \vspace{3em}
-
 
           {
             \fontsize{18pt}{30pt}
             \selectfont
 
-
             书名：《免费活着》
             \\[0.9em]
-
 
             英文名：Living for Free
             \\[0.9em]
 
-
             作者：王正阳
             \\[0.9em]
 
-
             版本：__VERSION__
             \\[0.9em]
-
 
             PDF 生成时间：
             __GENERATED_AT__
             \\[0.3em]
 
-
             UTC+8
             \\[0.9em]
-
 
             源码版本：
             __GIT_SHA__
             \\[0.9em]
 
-
             项目地址：
             \\[0.4em]
 
-
             github.com/meixiaoqiu/LivingForFree
-
           }
 
-
           \vspace{3em}
-
 
           {
             \fontsize{13pt}{22pt}
@@ -894,19 +675,14 @@ jobs:
             \\
 
             根据项目仓库中的 Markdown 书稿自动生成。
-
           }
-
 
           \end{center}
 
-
           \vspace*{\fill}
-
 
           \end{document}
           """
-
 
           template = (
               template
@@ -924,14 +700,12 @@ jobs:
               )
           )
 
-
           Path(
               "build/colophon.tex"
           ).write_text(
               template,
               encoding="utf-8"
           )
-
 
           print(
               "尾页版本：",
@@ -943,8 +717,12 @@ jobs:
               generated_at
           )
 
-          PY
+          print(
+              "源码版本：",
+              short_sha
+          )
 
+          PY
 
           xelatex \
             -interaction=nonstopmode \
@@ -952,9 +730,12 @@ jobs:
             -output-directory=build \
             build/colophon.tex
 
+          echo "尾页 PDF："
+          ls -lh build/colophon.pdf
+
 
       # ============================================================
-      # 9. 合并 PDF
+      # 9. 合并最终 PDF
       #
       # 封面
       # +
@@ -965,7 +746,6 @@ jobs:
 
       - name: Merge PDF
         run: |
-
           qpdf \
             --empty \
             --pages \
@@ -975,7 +755,6 @@ jobs:
             -- \
             build/LivingForFree.pdf
 
-
           echo "最终 PDF："
 
           ls -lh \
@@ -983,13 +762,11 @@ jobs:
 
 
       # ============================================================
-      # 10. 上传到 Actions
+      # 10. 上传测试 / 正式 PDF 到 Actions
       #
-      # test / publish 两种模式都会执行。
+      # test 和 publish 都会执行。
       #
-      # archive: false
-      # 表示直接上传 PDF，
-      # 不套一层 ZIP。
+      # 保留 30 天。
       # ============================================================
 
       - name: Upload PDF to Actions
@@ -998,6 +775,7 @@ jobs:
         uses: actions/upload-artifact@v7
 
         with:
+          name: LivingForFree-${{ inputs.mode }}-${{ github.run_number }}
           path: build/LivingForFree.pdf
           archive: false
           retention-days: 30
@@ -1005,15 +783,7 @@ jobs:
 
 
       # ============================================================
-      # 11. 输出构建摘要
-      #
-      # 在 Action 页面直接显示：
-      #
-      # 模式
-      # 字号
-      # 行距
-      # 页边距
-      # PDF 下载地址
+      # 11. 构建结果摘要
       # ============================================================
 
       - name: Build summary
@@ -1026,7 +796,6 @@ jobs:
           ARTIFACT_URL: ${{ steps.upload-pdf.outputs.artifact-url }}
 
         run: |
-
           echo "## 《免费活着》PDF 构建完成" \
             >> "$GITHUB_STEP_SUMMARY"
 
@@ -1045,7 +814,6 @@ jobs:
           echo "- 页边距：${MARGIN_MM}mm" \
             >> "$GITHUB_STEP_SUMMARY"
 
-
           if [[ "$MODE" == "publish" ]]; then
 
             echo "- 发布版本：$VERSION" \
@@ -1058,10 +826,8 @@ jobs:
 
           fi
 
-
           echo "" \
             >> "$GITHUB_STEP_SUMMARY"
-
 
           echo "[下载生成的 PDF]($ARTIFACT_URL)" \
             >> "$GITHUB_STEP_SUMMARY"
@@ -1070,13 +836,8 @@ jobs:
       # ============================================================
       # 12. 正式发布
       #
-      # 只有：
-      #
-      # mode = publish
-      #
-      # 才执行。
-      #
-      # test 模式直接跳过。
+      # 只有 mode = publish 才执行。
+      # test 模式自动跳过。
       # ============================================================
 
       - name: Create GitHub Release
@@ -1088,7 +849,6 @@ jobs:
           VERSION: ${{ inputs.version }}
 
         run: |
-
           gh release create "$VERSION" \
             "build/LivingForFree.pdf#《免费活着》PDF" \
             --repo "$GITHUB_REPOSITORY" \
